@@ -3,7 +3,7 @@ name: Build Nokia 5G21 Ultimate-Pro Firmware
 on:
   workflow_dispatch:      
   schedule:
-    - cron: '0 20 * * *'  # 每天凌晨 4 点自动编译
+    - cron: '0 20 * * *'  
 
 jobs:
   build:
@@ -31,9 +31,10 @@ jobs:
 
       - name: Add iStore Theme & Pro Modem UI
         run: |
-          # iStoreOS 风格主题
-          git clone --depth 1 https://github.com/gandalf3/luci-theme-design package/luci-theme-design
-          # 增强版 5G 模块 WebUI 信号看板
+          # 使用更加稳定的公共仓库地址，解决 128 错误
+          git clone --depth 1 https://github.com/Lienol/luci-theme-bootstrap package/luci-theme-bootstrap-custom || true
+          git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon package/luci-theme-argon
+          # 核心 5G 管理面板
           git clone --depth 1 https://github.com/Siriling/luci-app-modemmanager package/luci-app-modemmanager-pro
 
       - name: Update & Install Feeds
@@ -41,20 +42,18 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Patch Universal 5G Modem IDs
+      - name: Patch Universal 5G Modem Support
         run: |
-          # 注入广和通、移远、美格、龙尚等主流 5G 模块硬件 ID
           mkdir -p target/linux/generic/pending-5.4/
           cat <<EOF > target/linux/generic/pending-5.4/999-add-universal-5g-modems.patch
           --- a/drivers/usb/serial/option.c
           +++ b/drivers/usb/serial/option.c
-          @@ -2100,6 +2100,11 @@ static const struct usb_device_id option
+          @@ -2100,6 +2100,10 @@ static const struct usb_device_id option
            	{ USB_DEVICE(0x2cb7, 0x0104) }, /* Fibocom NL678系列 */
           +	{ USB_DEVICE(0x2cb7, 0x01a0) }, /* Fibocom FM160-EAU */
           +	{ USB_DEVICE(0x2cb7, 0x010b) }, /* Fibocom FG150/FM150 */
-          +	{ USB_DEVICE(0x2c7c, 0x0800) }, /* Quectel RM500Q/RM520N/RM530 */
+          +	{ USB_DEVICE(0x2c7c, 0x0800) }, /* Quectel RM500Q/RM520N */
           +	{ USB_DEVICE(0x2c7c, 0x0125) }, /* Quectel EC25/EM06 */
-          +	{ USB_DEVICE(0x05c6, 0x9011) }, /* Generic Qualcomm 5G */
            	{ } /* Terminating entry */
            };
           EOF
@@ -65,5 +64,40 @@ jobs:
           CONFIG_TARGET_ipq807x=y
           CONFIG_TARGET_ipq807x_generic_DEVICE_nokia_5g21=y
 
-          # --- 全能 5G 驱动 (QMI/MBIM/NCM/RNDIS) ---
-          CONFIG
+          # --- 全能 5G 核心驱动 ---
+          CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y
+          CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
+          CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y
+          CONFIG_PACKAGE_kmod-usb-serial-option=y
+
+          # --- 模块 WebUI 信号看板 & 短信 ---
+          CONFIG_PACKAGE_luci-app-modemmanager=y
+          CONFIG_PACKAGE_modemmanager=y
+          CONFIG_PACKAGE_sms-tool=y
+          CONFIG_PACKAGE_luci-app-sms-tool=y
+
+          # --- Docker 核心 ---
+          CONFIG_PACKAGE_luci-app-dockerman=y
+          CONFIG_PACKAGE_docker-ce=y
+
+          # --- 磁盘扩展 (实现 2G 空间) ---
+          CONFIG_PACKAGE_luci-app-diskman=y
+          CONFIG_PACKAGE_kmod-usb-storage=y
+          CONFIG_PACKAGE_kmod-fs-ext4=y
+          CONFIG_PACKAGE_block-mount=y
+
+          # --- 颜值主题 ---
+          CONFIG_PACKAGE_luci-theme-argon=y
+          EOF
+          make defconfig
+
+      - name: Download & Compile
+        run: |
+          make download -j8
+          make -j$(nproc) || make -j1 V=s
+
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nokia-5G21-Docker-Pro
+          path: bin/targets/ipq807x/generic/*.bin
