@@ -1,0 +1,63 @@
+name: Build Nokia 5G21 FM160 Firmware
+
+on:
+  workflow_dispatch: # 手动点击按钮触发
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3-setuptools swig zlib1g-dev apktool
+
+      - name: Clone source code
+        run: |
+          git clone --depth 1 https://github.com/coolsnowwolf/lede
+          cp -r lede/* .
+
+      - name: Update & Install feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Patch FM160-EAU Support (Kernel 5.4)
+        run: |
+          # 注入 FM160-EAU 的 USB ID (2cb7:01a0) 到内核驱动
+          sed -i '/{ USB_DEVICE(0x2cb7, 0x0104) }/a \	{ USB_DEVICE(0x2cb7, 0x01a0) }, /* Fibocom FM160-EAU */' target/linux/generic/files/drivers/usb/serial/option.c
+
+      - name: Load Custom Configuration
+        run: |
+          # 写入针对 Nokia 5G21 和 FM160 的配置
+          cat <<EOF > .config
+          CONFIG_TARGET_ipq807x=y
+          CONFIG_TARGET_ipq807x_generic_DEVICE_nokia_5g21=y
+          CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y
+          CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
+          CONFIG_PACKAGE_kmod-usb-serial-option=y
+          CONFIG_PACKAGE_luci-app-modemmanager=y
+          CONFIG_PACKAGE_modemmanager=y
+          CONFIG_PACKAGE_sms-tool=y
+          CONFIG_PACKAGE_kmod-qca-nss-drv=y
+          CONFIG_PACKAGE_kmod-qca-nss-ecm=y
+          # 如果需要 Wi-Fi 正常工作，请保持默认闭源驱动
+          EOF
+          make defconfig
+
+      - name: Download package
+        run: make download -j8
+
+      - name: Compile the firmware
+        run: make -j$(nproc) || make -j1 V=s
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v3
+        with:
+          name: Nokia-5G21-FM160-Firmware
+          path: bin/targets/ipq807x/generic/*.bin
