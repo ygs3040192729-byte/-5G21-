@@ -24,38 +24,19 @@ jobs:
           git clone --depth 1 https://github.com/coolsnowwolf/lede
           cp -r lede/* .
 
+      - name: Add iStore Theme
+        run: |
+          # 拉取 iStoreOS 风格的高清主题
+          git clone --depth 1 https://github.com/gandalf3/luci-theme-design package/luci-theme-design
+
       - name: Update & Install feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Load Custom Configuration
+      - name: Patch FM160-EAU Support
         run: |
-          cat <<EOF > .config
-          CONFIG_TARGET_ipq807x=y
-          CONFIG_TARGET_ipq807x_generic_DEVICE_nokia_5g21=y
-          CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y
-          CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
-          CONFIG_PACKAGE_kmod-usb-serial-option=y
-          CONFIG_PACKAGE_luci-app-modemmanager=y
-          CONFIG_PACKAGE_modemmanager=y
-          CONFIG_PACKAGE_sms-tool=y
-          CONFIG_PACKAGE_kmod-qca-nss-drv=y
-          CONFIG_PACKAGE_kmod-qca-nss-ecm=y
-          EOF
-          make defconfig
-
-      - name: Patch FM160-EAU Support (Universal Path)
-        run: |
-          # 自动寻找 option.c 文件并注入 ID
-          # 这种方式比写死路径更可靠
-          find package/kernel/linux/modules -name "*.mk" | xargs sed -i '/0x2cb7/d' || true
-          
-          # 直接在编译脚本中添加对 FM160 的支持
-          echo 'CONFIG_USB_SERIAL_OPTION=y' >> .config
-          
-          # 针对 Lean 源码的特殊处理：在工具链准备好后注入驱动
-          # 我们改用一种更稳妥的方式：直接修改内核 patch 文件夹
+          # 注入 5G 模块驱动补丁
           mkdir -p target/linux/generic/pending-5.4/
           cat <<EOF > target/linux/generic/pending-5.4/999-add-fibocom-fm160.patch
           --- a/drivers/usb/serial/option.c
@@ -67,6 +48,27 @@ jobs:
            };
           EOF
 
+      - name: Load Custom Configuration
+        run: |
+          # 这里的配置决定了固件的功能
+          cat <<EOF > .config
+          CONFIG_TARGET_ipq807x=y
+          CONFIG_TARGET_ipq807x_generic_DEVICE_nokia_5g21=y
+          # 核心拨号组件
+          CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y
+          CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
+          CONFIG_PACKAGE_kmod-usb-serial-option=y
+          CONFIG_PACKAGE_luci-app-modemmanager=y
+          CONFIG_PACKAGE_modemmanager=y
+          # iStore 风格主题
+          CONFIG_PACKAGE_luci-theme-design=y
+          CONFIG_PACKAGE_luci-app-design-config=y
+          # 硬件加速
+          CONFIG_PACKAGE_kmod-qca-nss-drv=y
+          CONFIG_PACKAGE_kmod-qca-nss-ecm=y
+          EOF
+          make defconfig
+
       - name: Download package
         run: make download -j8
 
@@ -76,5 +78,5 @@ jobs:
       - name: Upload firmware to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Nokia-5G21-FM160-Daily
+          name: Nokia-5G21-FM160-iStoreStyle
           path: bin/targets/ipq807x/generic/*.bin
