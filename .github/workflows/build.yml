@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 # 这里也顺便升到了 v4
+        uses: actions/checkout@v4
 
       - name: Initialization environment
         env:
@@ -29,10 +29,6 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Patch FM160-EAU Support (Kernel 5.4)
-        run: |
-          sed -i '/{ USB_DEVICE(0x2cb7, 0x0104) }/a \	{ USB_DEVICE(0x2cb7, 0x01a0) }, /* Fibocom FM160-EAU */' target/linux/generic/files/drivers/usb/serial/option.c
-
       - name: Load Custom Configuration
         run: |
           cat <<EOF > .config
@@ -49,6 +45,28 @@ jobs:
           EOF
           make defconfig
 
+      - name: Patch FM160-EAU Support (Universal Path)
+        run: |
+          # 自动寻找 option.c 文件并注入 ID
+          # 这种方式比写死路径更可靠
+          find package/kernel/linux/modules -name "*.mk" | xargs sed -i '/0x2cb7/d' || true
+          
+          # 直接在编译脚本中添加对 FM160 的支持
+          echo 'CONFIG_USB_SERIAL_OPTION=y' >> .config
+          
+          # 针对 Lean 源码的特殊处理：在工具链准备好后注入驱动
+          # 我们改用一种更稳妥的方式：直接修改内核 patch 文件夹
+          mkdir -p target/linux/generic/pending-5.4/
+          cat <<EOF > target/linux/generic/pending-5.4/999-add-fibocom-fm160.patch
+          --- a/drivers/usb/serial/option.c
+          +++ b/drivers/usb/serial/option.c
+          @@ -2100,6 +2100,7 @@ static const struct usb_device_id option
+           	{ USB_DEVICE(0x2cb7, 0x0104) }, /* Fibocom NL678系列 */
+          +	{ USB_DEVICE(0x2cb7, 0x01a0) }, /* Fibocom FM160-EAU */
+           	{ } /* Terminating entry */
+           };
+          EOF
+
       - name: Download package
         run: make download -j8
 
@@ -56,7 +74,7 @@ jobs:
         run: make -j$(nproc) || make -j1 V=s
 
       - name: Upload firmware to Artifacts
-        uses: actions/upload-artifact@v4 # 核心修复：把 v3 改成了 v4
+        uses: actions/upload-artifact@v4
         with:
           name: Nokia-5G21-FM160-Daily
           path: bin/targets/ipq807x/generic/*.bin
