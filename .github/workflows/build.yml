@@ -1,7 +1,9 @@
-name: Build Nokia 5G21 FM160 Firmware
+name: Daily Build Nokia 5G21 FM160 Firmware
 
 on:
-  workflow_dispatch: # 手动点击按钮触发
+  workflow_dispatch:      # 保留手动触发按钮
+  schedule:
+    - cron: '0 20 * * *'  # 每天北京时间凌晨 4:00 自动执行 (UTC 20:00)
 
 jobs:
   build:
@@ -29,12 +31,12 @@ jobs:
 
       - name: Patch FM160-EAU Support (Kernel 5.4)
         run: |
-          # 注入 FM160-EAU 的 USB ID (2cb7:01a0) 到内核驱动
+          # 核心步骤：注入 FM160-EAU 的硬件 ID，否则无法识别模块
           sed -i '/{ USB_DEVICE(0x2cb7, 0x0104) }/a \	{ USB_DEVICE(0x2cb7, 0x01a0) }, /* Fibocom FM160-EAU */' target/linux/generic/files/drivers/usb/serial/option.c
 
       - name: Load Custom Configuration
         run: |
-          # 写入针对 Nokia 5G21 和 FM160 的配置
+          # 自动配置：Nokia 5G21 型号、FM160 驱动、ModemManager 拨号插件、NSS 加速
           cat <<EOF > .config
           CONFIG_TARGET_ipq807x=y
           CONFIG_TARGET_ipq807x_generic_DEVICE_nokia_5g21=y
@@ -46,7 +48,6 @@ jobs:
           CONFIG_PACKAGE_sms-tool=y
           CONFIG_PACKAGE_kmod-qca-nss-drv=y
           CONFIG_PACKAGE_kmod-qca-nss-ecm=y
-          # 如果需要 Wi-Fi 正常工作，请保持默认闭源驱动
           EOF
           make defconfig
 
@@ -56,8 +57,8 @@ jobs:
       - name: Compile the firmware
         run: make -j$(nproc) || make -j1 V=s
 
-      - name: Upload firmware
+      - name: Upload firmware to Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: Nokia-5G21-FM160-Firmware
+          name: Nokia-5G21-FM160-Daily
           path: bin/targets/ipq807x/generic/*.bin
