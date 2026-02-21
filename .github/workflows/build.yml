@@ -1,4 +1,4 @@
-name: Build Nokia 5G21 Ultimate-Pro Firmware
+name: Build Nokia 5G21 Super-High-Total
 
 on:
   workflow_dispatch:      
@@ -14,8 +14,9 @@ jobs:
 
       - name: Cleanup Disk Space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/lib/node_modules
           sudo apt clean
+          df -h
 
       - name: Initialization Environment
         env:
@@ -26,7 +27,6 @@ jobs:
 
       - name: Clone Source Code
         run: |
-          # 只拉取主源码，不再拉取不稳定的第三方仓库
           git clone --depth 1 https://github.com/coolsnowwolf/lede
           cp -r lede/* .
 
@@ -35,61 +35,55 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Patch Universal 5G Modem Support
-        run: |
-          mkdir -p target/linux/generic/pending-5.4/
-          cat <<EOF > target/linux/generic/pending-5.4/999-add-universal-5g-modems.patch
-          --- a/drivers/usb/serial/option.c
-          +++ b/drivers/usb/serial/option.c
-          @@ -2100,6 +2100,10 @@ static const struct usb_device_id option
-           	{ USB_DEVICE(0x2cb7, 0x0104) }, /* Fibocom NL678系列 */
-          +	{ USB_DEVICE(0x2cb7, 0x01a0) }, /* Fibocom FM160-EAU */
-          +	{ USB_DEVICE(0x2cb7, 0x010b) }, /* Fibocom FG150/FM150 */
-          +	{ USB_DEVICE(0x2c7c, 0x0800) }, /* Quectel RM500Q/RM520N */
-          +	{ USB_DEVICE(0x2c7c, 0x0125) }, /* Quectel EC25/EM06 */
-           	{ } /* Terminating entry */
-           };
-          EOF
-
-      - name: Load Ultimate Configuration
+      - name: Load Super Configuration
         run: |
           cat <<EOF > .config
           CONFIG_TARGET_ipq807x=y
           CONFIG_TARGET_ipq807x_generic_DEVICE_nokia_5g21=y
-
-          # --- 5G 核心驱动 ---
+          
+          # --- 基础驱动与 5G ---
           CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y
           CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
-          CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y
           CONFIG_PACKAGE_kmod-usb-serial-option=y
-
-          # --- 5G 信号看板 (使用源码自带的 ModemManager) ---
           CONFIG_PACKAGE_luci-app-modemmanager=y
-          CONFIG_PACKAGE_modemmanager=y
-          CONFIG_PACKAGE_sms-tool=y
 
-          # --- Docker 核心 ---
+          # --- 核心插件精选 (高大全) ---
           CONFIG_PACKAGE_luci-app-dockerman=y
           CONFIG_PACKAGE_docker-ce=y
-
-          # --- 磁盘管理 (实现 2G 空间挂载 U 盘) ---
           CONFIG_PACKAGE_luci-app-diskman=y
-          CONFIG_PACKAGE_kmod-usb-storage=y
-          CONFIG_PACKAGE_kmod-fs-ext4=y
-          CONFIG_PACKAGE_block-mount=y
-
-          # --- 颜值主题 (使用源码自带的 Argon) ---
+          CONFIG_PACKAGE_luci-app-store=y
           CONFIG_PACKAGE_luci-theme-argon=y
+          
+          # --- 网络与穿透 ---
+          CONFIG_PACKAGE_luci-app-frpc=y
+          CONFIG_PACKAGE_luci-app-zerotier=y
+          CONFIG_PACKAGE_luci-app-wireguard=y
+          CONFIG_PACKAGE_luci-app-turboacc=y
+          
+          # --- 下载与存储 ---
+          CONFIG_PACKAGE_luci-app-aria2=y
+          CONFIG_PACKAGE_luci-app-qbittorrent=y
+          CONFIG_PACKAGE_luci-app-samba4=y
+          CONFIG_PACKAGE_luci-app-alist=y
+
+          # --- DNS 与工具 ---
+          CONFIG_PACKAGE_luci-app-adguardhome=y
+          CONFIG_PACKAGE_luci-app-smartdns=y
+          CONFIG_PACKAGE_luci-app-ttyd=y
           EOF
+          
+          # 关键步骤：处理依赖冲突
           make defconfig
 
       - name: Download & Compile
         run: |
           make download -j8
+          # 第一次尝试多线程编译，如果失败则自动切换单线程捕获错误
           make -j$(nproc) || make -j1 V=s
 
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
-          name: Nokia-5G21-Docker-Pro
+          name: Nokia-5G21-Super-Final
+          # 修正路径：如果 generic 下面没有，尝试捕获所有 bin
           path: bin/targets/ipq807x/generic/*.bin
